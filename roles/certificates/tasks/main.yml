@@ -1,0 +1,44 @@
+- name: 创建{{ kubernetes_etc_dir }}目录
+  file:
+    name: "{{ item }}"
+    state: directory
+    mode: "0644"
+  with_items:
+    - "{{ k8s_pki_dir }}"
+    - "{{ etcd_pki_dir }}"
+    - "{{ kube_proxy_data_dir }}"
+
+- name: kubeadm 方式安装生成证书
+  when: install_way == 'kubeadm'
+  include_tasks: kubeadm/main.yml
+
+- name: 二进制方式安装，cfssl 生成证书
+  when:
+    - install_way == 'binary'
+    - enable_cfssl_certs | bool
+  include_tasks: cfssl/main.yml
+
+- name: 二进制方式安装，openssl 生成证书
+  when:
+    - install_way == 'binary'
+    - not (enable_cfssl_certs | bool)
+  include_tasks: openssl/main.yml
+
+- block:
+  - name: 检查 service account 私钥是否存在
+    stat:
+      path: "{{ k8s_pki_dir }}/sa.key"
+    register: check_sa_key
+
+  - name: 生成 service account 公私钥证书对
+    when: not check_sa_key.stat.exists
+    command: "{{ item }}"
+    with_items:
+      - "openssl genrsa -out {{ k8s_pki_dir }}/sa.key {{ cert_key_size }}"
+      - "openssl {{ cert_key_algo }} -in {{ k8s_pki_dir }}/sa.key -pubout -out {{ k8s_pki_dir }}/sa.pub"
+  when: install_way == 'binary'
+  run_once: true
+  delegate_to: "{{ groups['kube_masters'][0] }}"
+
+- name: 同步证书和 kube-config 文件到各节点
+  include_tasks: synchronize/main.yml

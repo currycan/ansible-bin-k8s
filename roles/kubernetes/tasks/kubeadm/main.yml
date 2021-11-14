@@ -1,0 +1,29 @@
+- name: 所有 kube_cluster 节点渲染 kubeadm 的配置文件
+  template:
+    src: >-
+      {% if inventory_hostname == groups['kube_masters'][0] -%}
+      kubeadm/kubeadm-controlplane-init.yaml.j2
+      {%- elif inventory_hostname in groups['kube_masters'] -%}
+      kubeadm/kubeadm-controlplane-join.yaml.j2
+      {%- else -%}
+      kubeadm/kubeadm-join.yaml.j2
+      {%- endif %}
+    dest: "{{ kubernetes_etc_dir }}/kubeadm-config.yaml"
+    owner: "root"
+    group: "root"
+    mode: 0644
+
+- name: 和并 kubelet-config.yml 和 kube-proxy-config.yaml 至 kubeadm-config.yaml
+  shell: >
+    cat {{ kubelet_data_dir }}/config.yaml >> {{ kubernetes_etc_dir }}/kubeadm-config.yaml;
+    cat {{ kube_proxy_data_dir }}/config.yaml >> {{ kubernetes_etc_dir }}/kubeadm-config.yaml;
+
+- name: 设置 kubelet 开机启动
+  systemd:
+    name: kubelet
+    daemon_reload: yes
+    enabled: yes
+
+- include_tasks: master.yml
+
+- include_tasks: worker.yml
